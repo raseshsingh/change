@@ -40,7 +40,7 @@
 
     "web_accessible_resources": [
         {
-            "resources": ["src/injected/page-context.js"],
+            "resources": ["src/injected/page-context.js", "src/injected/detector.js"],
             "matches": ["<all_urls>"]
         }
     ]

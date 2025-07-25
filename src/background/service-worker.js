@@ -27,10 +27,46 @@ class ABInspectorBackground {
             }
         );
     }
+    async executeScriptInTab(script, tabId) {
+        if (!tabId) {
+            return { error: 'No tab ID available' };
+        }
+
+        try {
+            const results = await chrome.scripting.executeScript({
+                target: { tabId: tabId },
+                world: 'MAIN',
+                func: new Function(`
+                try {
+                    return (${script});
+                } catch (e) {
+                    console.error('[AB Inspector] Script execution error:', e);
+                    return null;
+                }
+            `)
+            });
+
+            return { data: results[0]?.result };
+        } catch (error) {
+            logger.error('Error executing script:', error);
+            return { error: error.message };
+        }
+    }
 
     async handleMessage(message, sender, sendResponse) {
         try {
             switch (message.type) {
+                case 'GET_TAB_ID':
+                    sendResponse({ tabId: sender.tab?.id });
+                    break;
+
+                case 'EXECUTE_SCRIPT':
+                    const scriptResult = await this.executeScriptInTab(
+                        message.data.script,
+                        sender.tab?.id
+                    );
+                    sendResponse(scriptResult);
+                    break;
                 case MESSAGE_TYPES.EXPERIMENTS_DETECTED:
                     await this.handleExperimentsDetected(message, sender);
                     sendResponse(

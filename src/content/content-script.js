@@ -11,16 +11,26 @@ class ABInspectorContentScript {
         this.lastDetectionTime = 0;
         this.detectionCooldown = 2000;
         this.setupMessageListeners();
+        this.injectDetectorScript(); // Add this
         this.scheduleDetection();
 
         logger.info('Content script initialized on:', window.location.href);
     }
 
     scheduleDetection() {
-        // Multiple detection attempts with delays
-        // setTimeout(() => this.detectExperiments(), 500);
-        setTimeout(() => this.detectExperiments(), 2000);
-        // setTimeout(() => this.detectExperiments(), 4000);
+        // Wait for page to fully load before detection
+        if (document.readyState === 'complete') {
+            // Try multiple times with increasing delays
+            setTimeout(() => this.detectExperiments(), 1000);
+            // setTimeout(() => this.detectExperiments(), 3000);
+            // setTimeout(() => this.detectExperiments(), 5000);
+        } else {
+            window.addEventListener('load', () => {
+                setTimeout(() => this.detectExperiments(), 1000);
+                // setTimeout(() => this.detectExperiments(), 3000);
+                // setTimeout(() => this.detectExperiments(), 5000);
+            });
+        }
     }
 
     setupMessageListeners() {
@@ -129,114 +139,90 @@ class ABInspectorContentScript {
     }
 
     async executeInMainWorld(script, scriptId) {
+        logger.info(`Executing script: ${scriptId}`);
+
+        try {
+            // Get the current tab ID from the background script
+            const response = await chrome.runtime.sendMessage({
+                type: 'GET_TAB_ID'
+            });
+
+            if (!response || !response.tabId) {
+                // Fallback: try using chrome.scripting directly
+                const results = await chrome.scripting.executeScript({
+                    target: { tabId: chrome.runtime.id }, // This won't work, but worth trying
+                    world: 'MAIN',
+                    func: new Function(script)
+                });
+
+                logger.info(`Script ${scriptId} completed successfully`);
+                return results[0]?.result;
+            }
+
+            // Send message to background script to execute
+            const result = await chrome.runtime.sendMessage({
+                type: 'EXECUTE_SCRIPT',
+                data: {
+                    script: script,
+                    scriptId: scriptId
+                }
+            });
+
+            if (result.error) {
+                throw new Error(result.error);
+            }
+
+            return result.data;
+
+        } catch (error) {
+            logger.error(`Failed to execute script ${scriptId}:`, error);
+
+            // Fallback: Try using postMessage approach
+            return await this.executeViaPostMessage(script, scriptId);
+        }
+    }
+
+// Add this new method for postMessage fallback
+    async executeViaPostMessage(script, scriptId) {
         return new Promise((resolve, reject) => {
-            const uniqueId = `ab_inspector_${scriptId}_${Date.now()}_${Math.random()
-                .toString(36)
-                .substr(2, 5)}`;
+            const messageId = `ab_inspector_${scriptId}_${Date.now()}`;
 
-            logger.info(`Executing script: ${scriptId}`);
+            const handleMessage = (event) => {
+                if (event.data && event.data.type === `${messageId}_response`) {
+                    window.removeEventListener('message', handleMessage);
 
-            try {
-                // Create a more reliable script injection
-                const scriptElement = document.createElement('script');
-
-                // Wrap the script in a safer execution context
-                scriptElement.textContent = `
-          (function() {
-            const scriptId = '${uniqueId}';
-            const resultEvent = 'ab_inspector_result_' + scriptId;
-            const errorEvent = 'ab_inspector_error_' + scriptId;
-            
-            try {
-              console.log('[AB Inspector] Executing ${scriptId}...');
-              
-              // Execute the actual script
-              const result = (function() {
-                ${script}
-              })();
-              
-              console.log('[AB Inspector] ${scriptId} result:', result);
-              
-              // Dispatch success event
-              document.dispatchEvent(new CustomEvent(resultEvent, {
-                detail: { result: result, success: true }
-              }));
-              
-            } catch (error) {
-              console.error('[AB Inspector] ${scriptId} error:', error);
-              
-              // Dispatch error event
-              document.dispatchEvent(new CustomEvent(errorEvent, {
-                detail: { error: error.message, success: false }
-              }));
-            }
-          })();
-        `;
-                scriptElement.classList.add('ab-inspector-script');
-
-                const resultEventName = `ab_inspector_result_${uniqueId}`;
-                const errorEventName = `ab_inspector_error_${uniqueId}`;
-
-                let resolved = false;
-
-                const handleResult = (event) => {
-                    if (resolved) return;
-                    resolved = true;
-
-                    cleanup();
-                    logger.info(`Script ${scriptId} completed successfully`);
-                    resolve(event.detail.result);
-                };
-
-                const handleError = (event) => {
-                    if (resolved) return;
-                    resolved = true;
-
-                    cleanup();
-                    logger.error(
-                        `Script ${scriptId} failed:`,
-                        event.detail.error
-                    );
-                    reject(new Error(event.detail.error));
-                };
-
-                const handleTimeout = () => {
-                    if (resolved) return;
-                    resolved = true;
-
-                    // cleanup();
-                    logger.error(`Script ${scriptId} timed out`);
-                    reject(
-                        new Error(`Script execution timeout for ${scriptId}`)
-                    );
-                };
-
-                const cleanup = () => {
-                    document.removeEventListener(resultEventName, handleResult);
-                    document.removeEventListener(errorEventName, handleError);
-                    if (scriptElement.parentNode) {
-                        scriptElement.parentNode.removeChild(scriptElement);
+                    if (event.data.success) {
+                        resolve(event.data.result);
+                    } else {
+                        reject(new Error(event.data.error));
                     }
-                };
+                }
+            };
 
-                // Set up event listeners
-                document.addEventListener(resultEventName, handleResult);
-                document.addEventListener(errorEventName, handleError);
+            window.addEventListener('message', handleMessage);
 
-                // Set timeout (reduced to 3 seconds)
-                setTimeout(handleTimeout, 3000);
+            // Try to execute via postMessage
+            window.postMessage({
+                type: 'AB_INSPECTOR_EXECUTE',
+                messageId: messageId,
+                script: script
+            }, '*');
 
-                // Inject the script
-                logger.info(`Injecting script ${scriptId}...`);
-                console.log(document.head,document.documentElement);
-                (document.head || document.documentElement).appendChild(
-                    scriptElement
-                );
-            } catch (error) {
-                logger.error(`Failed to inject script ${scriptId}:`, error);
-                reject(error);
-            }
+            // Timeout
+            setTimeout(() => {
+                window.removeEventListener('message', handleMessage);
+                reject(new Error(`Script execution timeout for ${scriptId}`));
+            }, 5000);
         });
+    }
+    injectDetectorScript() {
+        const script = document.createElement('script');
+        script.src = chrome.runtime.getURL('src/injected/detector.js');
+        script.onload = () => {
+            logger.info('Detector script injected');
+            script.remove();
+        };
+        (document.head || document.documentElement).appendChild(script);
     }
 }
 

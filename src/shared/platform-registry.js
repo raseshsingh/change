@@ -13,22 +13,38 @@ export const PLATFORMS = {
         name: 'Optimizely',
         detector: {
             script: `
-        try {
-          // Simple detection first
-          const hasOptimizely = !!(window.optimizely || window.optly || window.google_optimize);
-          
-          console.log('[AB Inspector] Optimizely detection:', {
-            optimizely: !!window.optimizely,
-            optly: !!window.optly,
-            google_optimize: !!window.google_optimize,
-            result: hasOptimizely
-          });
-          
-          return hasOptimizely;
-        } catch (e) {
-          console.error('[AB Inspector] Optimizely detector error:', e);
-          return false;
+        function checkOptimizely() {
+          try {
+            // Check multiple possible Optimizely objects
+            const hasOptimizely = !!(
+              window.optimizely || 
+              window.optly || 
+              window.google_optimize ||
+              (window.optimizelyEdge && window.optimizelyEdge.initialized)
+            );
+            
+            console.log('[AB Inspector] Optimizely detection:', {
+              optimizely: !!window.optimizely,
+              optly: !!window.optly,
+              google_optimize: !!window.google_optimize,
+              optimizelyEdge: !!(window.optimizelyEdge && window.optimizelyEdge.initialized),
+              documentReady: document.readyState,
+              result: hasOptimizely
+            });
+            
+            return hasOptimizely;
+          } catch (e) {
+            console.error('[AB Inspector] Optimizely detector error:', e);
+            return false;
+          }
         }
+        
+        // If Optimizely is not found and page is still loading, wait a bit
+        const result = checkOptimizely();
+        if (!result && document.readyState !== 'complete') {
+          console.log('[AB Inspector] Page still loading, Optimizely might load later');
+        }
+        return result;
       `,
         },
         extractor: {
@@ -133,111 +149,111 @@ export const PLATFORMS = {
         },
     },
 
-    // vwo: {
-    //     name: 'VWO',
-    //     detector: {
-    //         script: `
-    //     try {
-    //       const hasVWO = !!(window._vwo_exp || window.VWO || window._vwo_code);
-    //       console.log('[AB Inspector] VWO detection:', hasVWO);
-    //       return hasVWO;
-    //     } catch (e) {
-    //       console.error('[AB Inspector] VWO detector error:', e);
-    //       return false;
-    //     }
-    //   `,
-    //     },
-    //     extractor: {
-    //         script: `
-    //     try {
-    //       const experiments = [];
-    //
-    //       if (window._vwo_exp) {
-    //         Object.keys(window._vwo_exp).forEach(expId => {
-    //           const exp = window._vwo_exp[expId];
-    //           if (exp && exp.ready) {
-    //             experiments.push({
-    //               id: expId,
-    //               name: exp.name || 'VWO Experiment ' + expId,
-    //               platform: 'vwo',
-    //               currentVariation: exp.combination_chosen || exp.variation_chosen,
-    //               variations: exp.comb || exp.variations || [],
-    //               status: 'active'
-    //             });
-    //           }
-    //         });
-    //       }
-    //
-    //       console.log('[AB Inspector] VWO experiments found:', experiments.length);
-    //       return experiments;
-    //     } catch (e) {
-    //       console.error('[AB Inspector] VWO extractor error:', e);
-    //       return [];
-    //     }
-    //   `,
-    //     },
-    //     forcer: {
-    //         method: FORCE_METHODS.COOKIE,
-    //         implementation: {
-    //             cookieName: '_vwo_uuid_v2',
-    //             generateCookieValue: (experimentId, variationId) =>
-    //                 `${experimentId}:${variationId}`,
-    //         },
-    //     },
-    // },
-    //
-    // convert: {
-    //     name: 'Convert.com',
-    //     detector: {
-    //         script: `
-    //     try {
-    //       const hasConvert = !!(window.convert || window._conv_q);
-    //       console.log('[AB Inspector] Convert detection:', hasConvert);
-    //       return hasConvert;
-    //     } catch (e) {
-    //       console.error('[AB Inspector] Convert detector error:', e);
-    //       return false;
-    //     }
-    //   `,
-    //     },
-    //     extractor: {
-    //         script: `
-    //     try {
-    //       const experiments = [];
-    //
-    //       if (window.convert && window.convert.experiments) {
-    //         Object.keys(window.convert.experiments).forEach(expId => {
-    //           const exp = window.convert.experiments[expId];
-    //           if (exp) {
-    //             experiments.push({
-    //               id: expId,
-    //               name: exp.name || 'Convert Experiment ' + expId,
-    //               platform: 'convert',
-    //               currentVariation: exp.variation,
-    //               variations: exp.variations || [],
-    //               status: 'active'
-    //             });
-    //           }
-    //         });
-    //       }
-    //
-    //       console.log('[AB Inspector] Convert experiments found:', experiments.length);
-    //       return experiments;
-    //     } catch (e) {
-    //       console.error('[AB Inspector] Convert extractor error:', e);
-    //       return [];
-    //     }
-    //   `,
-    //     },
-    //     forcer: {
-    //         method: FORCE_METHODS.COOKIE,
-    //         implementation: {
-    //             cookieName: '_conv_v',
-    //             generateCookieValue: (experimentId, variationId) =>
-    //                 `${experimentId}:${variationId}`,
-    //         },
-    //     },
-    // },
+    vwo: {
+        name: 'VWO',
+        detector: {
+            script: `
+        try {
+          const hasVWO = !!(window._vwo_exp || window.VWO || window._vwo_code);
+          console.log('[AB Inspector] VWO detection:', hasVWO);
+          return hasVWO;
+        } catch (e) {
+          console.error('[AB Inspector] VWO detector error:', e);
+          return false;
+        }
+      `,
+        },
+        extractor: {
+            script: `
+        try {
+          const experiments = [];
+
+          if (window._vwo_exp) {
+            Object.keys(window._vwo_exp).forEach(expId => {
+              const exp = window._vwo_exp[expId];
+              if (exp && exp.ready) {
+                experiments.push({
+                  id: expId,
+                  name: exp.name || 'VWO Experiment ' + expId,
+                  platform: 'vwo',
+                  currentVariation: exp.combination_chosen || exp.variation_chosen,
+                  variations: exp.comb || exp.variations || [],
+                  status: 'active'
+                });
+              }
+            });
+          }
+
+          console.log('[AB Inspector] VWO experiments found:', experiments.length);
+          return experiments;
+        } catch (e) {
+          console.error('[AB Inspector] VWO extractor error:', e);
+          return [];
+        }
+      `,
+        },
+        forcer: {
+            method: FORCE_METHODS.COOKIE,
+            implementation: {
+                cookieName: '_vwo_uuid_v2',
+                generateCookieValue: (experimentId, variationId) =>
+                    `${experimentId}:${variationId}`,
+            },
+        },
+    },
+
+    convert: {
+        name: 'Convert.com',
+        detector: {
+            script: `
+        try {
+          const hasConvert = !!(window.convert || window._conv_q);
+          console.log('[AB Inspector] Convert detection:', hasConvert);
+          return hasConvert;
+        } catch (e) {
+          console.error('[AB Inspector] Convert detector error:', e);
+          return false;
+        }
+      `,
+        },
+        extractor: {
+            script: `
+        try {
+          const experiments = [];
+
+          if (window.convert && window.convert.experiments) {
+            Object.keys(window.convert.experiments).forEach(expId => {
+              const exp = window.convert.experiments[expId];
+              if (exp) {
+                experiments.push({
+                  id: expId,
+                  name: exp.name || 'Convert Experiment ' + expId,
+                  platform: 'convert',
+                  currentVariation: exp.variation,
+                  variations: exp.variations || [],
+                  status: 'active'
+                });
+              }
+            });
+          }
+
+          console.log('[AB Inspector] Convert experiments found:', experiments.length);
+          return experiments;
+        } catch (e) {
+          console.error('[AB Inspector] Convert extractor error:', e);
+          return [];
+        }
+      `,
+        },
+        forcer: {
+            method: FORCE_METHODS.COOKIE,
+            implementation: {
+                cookieName: '_conv_v',
+                generateCookieValue: (experimentId, variationId) =>
+                    `${experimentId}:${variationId}`,
+            },
+        },
+    },
 };
 
 export const getAllPlatforms = () => Object.keys(PLATFORMS);
